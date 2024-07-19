@@ -96,6 +96,7 @@ bert_model = BertModel.from_pretrained('bert-base-chinese', config=config)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = AnimeRatingModel(bert_model).to(device)
 state_dict = torch.load('../model/model4_upgrade_anime_rating_model.pth', map_location=device)
+# bert.embeddings.position_ids caused trouble, need to drop it here
 state_dict.pop('bert.embeddings.position_ids', None)
 model.load_state_dict(state_dict, strict=False)
 
@@ -103,7 +104,8 @@ class AnimeInput(BaseModel):
     title: str
     summary: str
 
-@app.post("/predict-rating")
+# endpoint to read in anime name and summary, and return rating. Work for single anime.
+@app.post("/predict-rating/single")
 async def predict_rating(anime: AnimeInput):
     try:
         prediction = predict_single(model, tokenizer, anime.title, anime.summary, device)
