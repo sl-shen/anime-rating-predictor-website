@@ -54,7 +54,9 @@ interface Anime {
                     <a href={`https://bangumi.tv/subject/${anime.id}`} target="_blank" rel="noopener noreferrer" className="anime-title">
                       {anime.title}
                     </a>
-                    <p className="anime-rating">预测评分: {anime.rating.toFixed(2)}</p>
+                    <p className="anime-rating">
+                      {anime.rating === -1 ? '预测评分: NA' : `预测评分: ${anime.rating.toFixed(2)}`}
+                    </p>
                   </div>
                 </div>
               ))}

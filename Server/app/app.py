@@ -317,20 +317,28 @@ async def update_anime(background_tasks: BackgroundTasks):
     background_tasks.add_task(update_anime_database)
     return {"message": "Anime update task has been scheduled"}
 
+async def check_and_update_anime_database():
+    # 检查是否是每月的第一天
+    if datetime.now().day == 1:
+        print("Starting monthly anime database update...")
+        await update_anime_database()
+    else:
+        print("Not the first day of the month, skipping update.")
+
 # 定时任务
 async def schedule_anime_update():
+    aioschedule.every().day.at("00:00").do(check_and_update_anime_database)
     while True:
         await aioschedule.run_pending()
-        await asyncio.sleep(1)
+        await asyncio.sleep(3600)  # 每小时检查一次
 
 @app.on_event("startup")
 async def startup_event():
     # 创建文本索引
     await collection.create_index([("title", "text"), ("summary", "text")])
     # 首次运行爬虫
-    # await update_anime_database()
+    #await update_anime_database()
     # 设置定时任务
-    aioschedule.every().day.at("00:00").do(update_anime_database)
     asyncio.create_task(schedule_anime_update())
 
 # 关闭数据库连接
