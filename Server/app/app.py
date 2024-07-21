@@ -188,7 +188,7 @@ class PyObjectId(ObjectId):
 PydanticObjectId = Annotated[PyObjectId, core_schema.json_schema({"type": "string"})]
 
 class AnimeInfoInDB(BaseModel):
-    id: PydanticObjectId = Field(default_factory=PyObjectId, alias="_id")
+    idid: str = Field(alias="id")
     title: str
     image_url: str
     summary: str
@@ -328,7 +328,7 @@ async def startup_event():
     # 创建文本索引
     await collection.create_index([("title", "text"), ("summary", "text")])
     # 首次运行爬虫
-    await update_anime_database()
+    # await update_anime_database()
     # 设置定时任务
     aioschedule.every().day.at("00:00").do(update_anime_database)
     asyncio.create_task(schedule_anime_update())
