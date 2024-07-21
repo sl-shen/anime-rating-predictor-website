@@ -194,6 +194,7 @@ class AnimeInfoInDB(BaseModel):
     summary: str
     year: int
     month: int
+    rating: Optional[float] = None  # 新增字段
 
     model_config = {
         "populate_by_name": True,
@@ -263,6 +264,11 @@ async def scrape_bangumi():
                 for anime in anime_list:
                     details = await get_anime_details(session, anime['id'])
                     anime.update(details)
+                    
+                    # 计算并添加rating
+                    rating = predict_single(model, tokenizer, anime['title'], anime['summary'], device)
+                    anime['rating'] = round(rating, 2)
+                    
                     print(anime)
                     all_anime.append(anime)
                     
@@ -322,7 +328,7 @@ async def startup_event():
     # 创建文本索引
     await collection.create_index([("title", "text"), ("summary", "text")])
     # 首次运行爬虫
-    # await update_anime_database()
+    await update_anime_database()
     # 设置定时任务
     aioschedule.every().day.at("00:00").do(update_anime_database)
     asyncio.create_task(schedule_anime_update())
