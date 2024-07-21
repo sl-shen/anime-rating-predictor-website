@@ -1,11 +1,27 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizer, BertModel, BertConfig
 import pandas as pd
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, GetJsonSchemaHandler
+import motor.motor_asyncio
+import os
+from dotenv import load_dotenv
+import asyncio
+import aiohttp
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import time
+import random
+from typing import List, Optional, Annotated, Any
+from bson import ObjectId
+import aioschedule
+import json
+from pydantic_core import core_schema
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -137,3 +153,185 @@ def predict_single(model, tokenizer, title, summary, device):
         output = model(input_ids, attention_mask)
     
     return output.item()
+
+
+
+# connect to db
+client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["DATABASE_URL"])
+db = client.dataSet
+collection = db.get_collection("Bangumi_anime")
+
+# Pydantic 模型
+class PyObjectId(ObjectId):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not ObjectId.is_valid(v):
+            raise ValueError("Invalid objectid")
+        return ObjectId(v)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source_type: Any, _handler: GetJsonSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.union_schema([
+            core_schema.is_instance_schema(ObjectId),
+            core_schema.no_info_after_validator_function(
+                cls.validate,
+                core_schema.str_schema(),
+            ),
+        ])
+
+PydanticObjectId = Annotated[PyObjectId, core_schema.json_schema({"type": "string"})]
+
+class AnimeInfoInDB(BaseModel):
+    id: PydanticObjectId = Field(default_factory=PyObjectId, alias="_id")
+    title: str
+    image_url: str
+    summary: str
+    year: int
+    month: int
+
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str}
+    }
+    
+# 爬虫函数
+async def get_anime_list(session, year, month, page=1):
+    url = f"https://bangumi.tv/anime/browser/tv/airtime/{year}-{month:02d}?page={page}"
+    async with session.get(url) as response:
+        content = await response.text()
+        #print(content)
+
+    soup = BeautifulSoup(content, 'html.parser')
+    
+    anime_list = []
+    items = soup.select('#browserItemList li.item')
+    
+    for item in items:
+        anime_id = item['id'].split('_')[-1]
+        title = item.select_one('a.l').text.strip()
+        image_url = item.select_one('img.cover')['src'] if item.select_one('img.cover') else None
+        
+        anime_list.append({
+            'id': anime_id,
+            'title': title,
+            'image_url': image_url,
+            'year': year,
+            'month': month
+        })
+    
+    print (anime_list)
+    return anime_list
+
+async def get_anime_details(session, anime_id):
+    url = f"https://api.bgm.tv/v0/subjects/{anime_id}"
+    async with session.get(url) as response:
+        content = await response.text()
+    
+    data = json.loads(content)
+    summary = data.get('summary', '')
+    
+    return {
+        'summary': summary
+    }
+
+async def scrape_bangumi():
+    current_date = datetime.now()
+    end_date = datetime(2024, 10, 31)
+    
+    all_anime = []
+    
+    async with aiohttp.ClientSession() as session:
+        while current_date <= end_date:
+            year = current_date.year
+            month = current_date.month
+            page = 1
+            
+            while True:
+                print(f"Scraping {year}-{month:02d} page {page}")
+                anime_list = await get_anime_list(session, year, month, page)
+                
+                if not anime_list:
+                    break
+                
+                for anime in anime_list:
+                    details = await get_anime_details(session, anime['id'])
+                    anime.update(details)
+                    print(anime)
+                    all_anime.append(anime)
+                    
+                    # 添加随机延迟，避免请求过于频繁
+                    await asyncio.sleep(random.uniform(1, 3))
+                
+                page += 1
+            
+            # 移到下一个月
+            current_date += timedelta(days=32)
+            current_date = current_date.replace(day=1)
+    
+    return all_anime
+
+# 数据库操作
+async def update_anime_database():
+    try:
+        anime_data = await scrape_bangumi()
+        # 清空集合
+        await collection.delete_many({})
+        # 插入新数据
+        if anime_data:
+            await collection.insert_many(anime_data)
+        print("Database updated successfully")
+    except Exception as e:
+        print(f"Error updating database: {e}")
+
+# API 端点
+@app.get("/api/current-anime", response_model=List[AnimeInfoInDB])
+async def get_current_anime(skip: int = 0, limit: int = 100):
+    anime_list = await collection.find().skip(skip).limit(limit).to_list(length=limit)
+    return anime_list
+
+@app.get("/api/anime/{year}/{month}", response_model=List[AnimeInfoInDB])
+async def get_anime_by_month(year: int, month: int, skip: int = 0, limit: int = 100):
+    anime_list = await collection.find({"year": year, "month": month}).skip(skip).limit(limit).to_list(length=limit)
+    return anime_list
+
+@app.get("/api/anime/search", response_model=List[AnimeInfoInDB])
+async def search_anime(query: str, skip: int = 0, limit: int = 100):
+    anime_list = await collection.find({"$text": {"$search": query}}).skip(skip).limit(limit).to_list(length=limit)
+    return anime_list
+
+@app.post("/api/update-anime")
+async def update_anime(background_tasks: BackgroundTasks):
+    background_tasks.add_task(update_anime_database)
+    return {"message": "Anime update task has been scheduled"}
+
+# 定时任务
+async def schedule_anime_update():
+    while True:
+        await aioschedule.run_pending()
+        await asyncio.sleep(1)
+
+@app.on_event("startup")
+async def startup_event():
+    # 创建文本索引
+    await collection.create_index([("title", "text"), ("summary", "text")])
+    # 首次运行爬虫
+    # await update_anime_database()
+    # 设置定时任务
+    aioschedule.every().day.at("00:00").do(update_anime_database)
+    asyncio.create_task(schedule_anime_update())
+
+# 关闭数据库连接
+@app.on_event("shutdown")
+async def shutdown_event():
+    client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
