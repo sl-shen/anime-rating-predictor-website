@@ -200,7 +200,7 @@ class AnimeInfoInDB(BaseModel):
         "arbitrary_types_allowed": True,
         "json_encoders": {ObjectId: str}
     }
-    
+
 # 爬虫函数
 async def get_anime_list(session, year, month, page=1):
     url = f"https://bangumi.tv/anime/browser/tv/airtime/{year}-{month:02d}?page={page}"
@@ -332,6 +332,3 @@ async def startup_event():
 async def shutdown_event():
     client.close()
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
