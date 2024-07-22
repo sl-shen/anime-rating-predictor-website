@@ -192,7 +192,7 @@ PydanticObjectId = Annotated[PyObjectId, core_schema.json_schema({"type": "strin
 class AnimeInfoInDB(BaseModel):
     idid: str = Field(alias="id")
     title: str
-    image_url: str
+    image_url: Optional[str]
     summary: str
     year: int
     month: int
@@ -252,7 +252,7 @@ async def get_anime_details(session, anime_id):
 @app.get("/api/anime-detail-from-web")
 async def scrape_bangumi():
     current_date = datetime.now()
-    end_date = datetime(2024, 10, 31)
+    end_date = datetime(2026, 12, 31)
     
     all_anime = []
     
@@ -306,7 +306,7 @@ async def update_anime_database():
 
 # API 端点
 @app.get("/api/current-anime", response_model=List[AnimeInfoInDB])
-async def get_current_anime(skip: int = 0, limit: int = 100):
+async def get_current_anime(skip: int = 0, limit: int = 150):
     anime_list = await collection.find().skip(skip).limit(limit).to_list(length=limit)
     return anime_list
 
