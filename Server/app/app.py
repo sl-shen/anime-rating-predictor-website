@@ -20,6 +20,8 @@ from bson import ObjectId
 import aioschedule
 import json
 from pydantic_core import core_schema
+from deep_translator import GoogleTranslator
+from langdetect import detect
 
 load_dotenv()
 
@@ -237,11 +239,17 @@ async def get_anime_details(session, anime_id):
     
     data = json.loads(content)
     summary = data.get('summary', '')
-    
+
+    # 判断日语
+    if summary:
+        detected_lang = detect(summary)
+        if detected_lang == 'ja':
+              summary = GoogleTranslator(source="ja", target="zh-CN").translate(text=summary)
     return {
         'summary': summary
     }
 
+@app.get("/api/anime-detail-from-web")
 async def scrape_bangumi():
     current_date = datetime.now()
     end_date = datetime(2024, 10, 31)
